@@ -1,0 +1,17 @@
+.tile{
+    height: 80px;
+	width: 80px;
+	display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 60px;
+    font-family: cursive;
+}
+
+.gameBoard{
+	display: none;
+}
+
+.center{
+	margin: 0 auto;
+}
