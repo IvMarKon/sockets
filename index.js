@@ -42,7 +42,7 @@ wss.on('connection', (ws) => {
           wss.clients.forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
               client.send(JSON.stringify({
-                type: 'player2',
+                type: 'player1',
               }));
             }
           });

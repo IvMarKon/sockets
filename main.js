@@ -228,7 +228,7 @@ const turnPlayed = (data) => {
   const col = data.tile.split('_')[1][1];
   const opponentType = player.getPlayerType() === P1 ? P2 : P1;
 
-  game.updateBoard(opponentType, row, col, tile);
+  game.updateBoard(opponentType, row, col, data.tile);
   player.setCurrentTurn(true);
 };
 
@@ -242,8 +242,6 @@ const gameEnd = (data) => {
 
 ws.addEventListener('message', (message) => {
   const action = JSON.parse(message.data);
-
-  console.log(message, player, game);
 
   switch (action.type) {
     case 'newGame':
