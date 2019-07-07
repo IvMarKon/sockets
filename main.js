@@ -3,7 +3,7 @@ const P2 = 'O';
 let player;
 let game;
 
-const socket = io.connect('http://localhost:5000');
+const ws = new WebSocket('ws://localhost:5000');
 
 class Player {
   constructor(name, type) {
@@ -75,7 +75,7 @@ class Game {
       game.updateBoard(player.getPlayerType(), row, col, this.id);
 
       player.setCurrentTurn(false);
-      player.updatePlaysArr(1 << ((row * 3) + col));
+      player.updatePlaysArr(1 << (row * 3 + col));
 
       game.checkWinner();
     }
@@ -119,34 +119,13 @@ class Game {
     const clickedTile = $(tile).attr('id');
 
     // Emit an event to update other player that you've played your turn.
-    socket.emit('playTurn', {
+    ws.send(JSON.stringify({
+      type: 'playTurn',
       tile: clickedTile,
       room: this.getRoomId(),
-    });
+    }));
   }
-  /**
-   *
-   * To determine a win condition, each square is "tagged" from left
-   * to right, top to bottom, with successive powers of 2.  Each cell
-   * thus represents an individual bit in a 9-bit string, and a
-   * player's squares at any given time can be represented as a
-   * unique 9-bit value. A winner can thus be easily determined by
-   * checking whether the player's current 9 bits have covered any
-   * of the eight "three-in-a-row" combinations.
-   *
-   *     273                 84
-   *        \               /
-   *          1 |   2 |   4  = 7
-   *       -----+-----+-----
-   *          8 |  16 |  32  = 56
-   *       -----+-----+-----
-   *         64 | 128 | 256  = 448
-   *       =================
-   *         73   146   292
-   *
-   *  We have these numbers in the Player.wins array and for the current
-   *  player, we've stored this information in playsArr.
-   */
+
   checkWinner() {
     const currentPlayerPositions = player.getPlaysArr();
 
@@ -158,10 +137,11 @@ class Game {
 
     const tieMessage = 'Game Tied :(';
     if (this.checkTie()) {
-      socket.emit('gameEnded', {
+      ws.send(JSON.stringify({
+        type: 'gameEnded',
         room: this.getRoomId(),
         message: tieMessage,
-      });
+      }));
       alert(tieMessage);
       window.location.reload();
     }
@@ -171,14 +151,13 @@ class Game {
     return this.moves >= 9;
   }
 
-  // Announce the winner if the current client has won.
-  // Broadcast this on the room to let the opponent know.
   announceWinner() {
     const message = `${player.getPlayerName()} wins!`;
-    socket.emit('gameEnded', {
+    ws.send(JSON.stringify({
+      type: 'gameEnded',
       room: this.getRoomId(),
       message,
-    });
+    }));
     alert(message);
     window.location.reload();
   }
@@ -197,7 +176,10 @@ $('#new').on('click', () => {
     alert('Please enter your name.');
     return;
   }
-  socket.emit('createGame', { name });
+  ws.send(JSON.stringify({
+    type: 'createGame',
+    name,
+  }));
   player = new Player(name, P1);
 });
 
@@ -209,65 +191,77 @@ $('#join').on('click', () => {
     alert('Please enter your name and game ID.');
     return;
   }
-  socket.emit('joinGame', { name, room: roomID });
+  ws.send(JSON.stringify({
+    type: 'joinGame',
+    name,
+    room: roomID,
+  }));
   player = new Player(name, P2);
 });
 
-// New Game created by current client. Update the UI and create new Game var.
-socket.on('newGame', (data) => {
-  const message = `Hello, ${data.name}. Please ask your friend to enter Game ID: 
-      ${data.room}. Waiting for player 2...`;
 
-  // Create game for player 1
+// server response handlers
+const newGame = (data) => {
+  const message = `Hello, ${data.name}. Please ask your friend to enter Game ID: 
+  ${data.room}. Waiting for player 2...`;
+
   game = new Game(data.room);
   game.displayBoard(message);
-});
+};
 
-/**
- * If player creates the game, he'll be P1(X) and has the first turn.
- * This event is received when opponent connects to the room.
- */
-socket.on('player1', () => {
+const player1 = () => {
   const message = `Hello, ${player.getPlayerName()}`;
   $('#userHello').html(message);
   player.setCurrentTurn(true);
-});
+};
 
-/**
- * Joined the game, so player is P2(O).
- * This event is received when P2 successfully joins the game room.
- */
-socket.on('player2', (data) => {
+const player2 = (data) => {
   const message = `Hello, ${data.name}`;
 
-  // Create game for player 2
   game = new Game(data.room);
   game.displayBoard(message);
   player.setCurrentTurn(false);
-});
+};
 
-/**
- * Opponent played his turn. Update UI.
- * Allow the current player to play now.
- */
-socket.on('turnPlayed', (data) => {
+const turnPlayed = (data) => {
   const row = data.tile.split('_')[1][0];
   const col = data.tile.split('_')[1][1];
   const opponentType = player.getPlayerType() === P1 ? P2 : P1;
 
-  game.updateBoard(opponentType, row, col, data.tile);
+  game.updateBoard(opponentType, row, col, tile);
   player.setCurrentTurn(true);
-});
+};
 
-// If the other player wins, this event is received. Notify user game has ended.
-socket.on('gameEnd', (data) => {
+const gameEnd = (data) => {
   game.endGame(data.message);
-  socket.leave(data.room);
-});
+  ws.send(JSON.stringify({
+    type: 'leaveRoom',
+    room: data.room,
+  }));
+};
 
-/**
- * End the game on any err event.
- */
-socket.on('err', (data) => {
-  game ? game.endGame(data.message) : alert(data.message);
+ws.addEventListener('message', (message) => {
+  const action = JSON.parse(message.data);
+
+  console.log(message, player, game);
+
+  switch (action.type) {
+    case 'newGame':
+      newGame(action);
+      break;
+    case 'player1':
+      player1();
+      break;
+    case 'player2':
+      player2(action);
+      break;
+    case 'turnPlayed':
+      turnPlayed(action);
+      break;
+    case 'gameEnd':
+      gameEnd(action);
+      break;
+    default:
+      game ? game.endGame(action.message) : alert(action.message);
+  }
 });

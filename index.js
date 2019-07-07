@@ -1,45 +1,89 @@
+const PORT = process.env.PORT || 5000;
+
 const express = require('express');
-const path = require('path');
+const WebSocket = require('ws');
 
-const app = express();
-const server = require('http').Server(app);
-const io = require('socket.io')(server);
+let counter = 0;
+const rooms = [];
 
-let rooms = 0;
-
-app.use(express.static('.'));
-
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-io.on('connection', (socket) => {
-  socket.on('createGame', (data) => {
-    socket.join(`room-${++rooms}`);
-    socket.emit('newGame', { name: data.name, room: `room-${rooms}` });
+// Setup Express and start listening on PORT
+const app = express()
+  .use(express.static('.'))
+  .get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+  })
+  .listen(PORT, () => {
+    console.log(`Listening on ${PORT}`);
   });
 
-  socket.on('joinGame', (data) => {
-    const room = io.nsps['/'].adapter.rooms[data.room];
-    if (room && room.length === 1) {
-      socket.join(data.room);
-      socket.broadcast.to(data.room).emit('player1', {});
-      socket.emit('player2', { name: data.name, room: data.room });
-    } else {
-      socket.emit('err', { message: 'Room not exist' });
+const wss = new WebSocket.Server({ server: app });
+
+wss.on('connection', (ws) => {
+  ws.on('message', (message) => {
+    console.log(message, rooms);
+    const action = JSON.parse(message);
+
+    switch (action.type) {
+      case 'createGame':
+        rooms.push({
+          id: counter,
+          player1: action.name,
+        });
+        ws.send(JSON.stringify({
+          type: 'newGame',
+          name: action.name,
+          room: counter,
+        }));
+        counter++;
+        break;
+      case 'joinGame':
+        if (action.room && rooms[action.room * 1] && !rooms[action.room * 1].player2) {
+          rooms[action.room * 1].player2 = action.name;
+          wss.clients.forEach((client) => {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({
+                type: 'player2',
+              }));
+            }
+          });
+          ws.send(JSON.stringify({
+            type: 'player2',
+            name: action.name,
+            room: action.room,
+          }));
+        } else {
+          ws.send(JSON.stringify({
+            type: 'err',
+            message: 'Room not exist',
+          }));
+        }
+        break;
+      case 'playTurn':
+        wss.clients.forEach((client) => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'turnPlayed',
+              tile: action.tile,
+              room: action.room,
+            }));
+          }
+        });
+        break;
+      case 'gameEnded':
+        wss.clients.forEach((client) => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'gameEnd',
+              ...action,
+            }));
+          }
+        });
+        break;
+      default:
+        ws.send(JSON.stringify({
+          type: 'err',
+          message: 'no case for such type of action',
+        }));
     }
   });
-
-  socket.on('playTurn', (data) => {
-    socket.broadcast.to(data.room).emit('turnPlayed', {
-      tile: data.tile,
-      room: data.room,
-    });
-  });
-
-  socket.on('gameEnded', (data) => {
-    socket.broadcast.to(data.room).emit('gameEnd', data);
-  });
 });
-
-server.listen(process.env.PORT || 5000);
