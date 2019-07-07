@@ -20,7 +20,6 @@ const wss = new WebSocket.Server({ server: app });
 
 wss.on('connection', (ws) => {
   ws.on('message', (message) => {
-    console.log(message, rooms);
     const action = JSON.parse(message);
 
     switch (action.type) {
